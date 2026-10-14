@@ -14,7 +14,7 @@ COPY packages/shared packages/shared
 COPY apps/web apps/web
 RUN npm run build -w packages/shared && npm run build -w apps/web
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 COPY infra/docker/web.nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD wget -qO- http://127.0.0.1/healthz >/dev/null || exit 1
