@@ -1,0 +1,110 @@
+# CD bagian 1: saat tag v* dibuat (atau manual), bangun & dorong image ke GHCR,
+# lalu buat GitHub Release dengan catatan dari CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag image (default: sha pendek)'
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+
+jobs:
+  images:
+    name: Build & push ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {
+              name: market-service,
+              dockerfile: infra/docker/node-service.Dockerfile,
+              context: .,
+              build_args: SERVICE=market-service,
+            }
+          - {
+              name: user-service,
+              dockerfile: infra/docker/node-service.Dockerfile,
+              context: .,
+              build_args: SERVICE=user-service,
+            }
+          - {
+              name: alert-worker,
+              dockerfile: infra/docker/node-service.Dockerfile,
+              context: .,
+              build_args: SERVICE=alert-worker,
+            }
+          - { name: web, dockerfile: infra/docker/web.Dockerfile, context: ., build_args: '' }
+          - {
+              name: gateway,
+              dockerfile: infra/gateway/Dockerfile,
+              context: infra/gateway,
+              build_args: '',
+            }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  github-release:
+    name: GitHub Release
+    needs: images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ambil catatan rilis dari CHANGELOG.md
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { p=1; next }
+            p && $0 ~ "^## \\[" { exit }
+            p { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then echo "Rilis $GITHUB_REF_NAME" > release-notes.md; fi
+          echo "Image: ${IMAGE_PREFIX}/<service>:${VERSION}" >> release-notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: true
