@@ -1,13 +1,19 @@
 import type {
+  Alert,
   ApiEnvelope,
   ApiError,
+  AuthResponse,
   ConvertData,
+  CreateAlertInput,
+  CreateWatchlistItemInput,
   CryptoHistoryData,
   CryptoTopData,
   FxCurrenciesData,
   FxHistoryData,
   FxLatestData,
   HistoryRange,
+  UpdateAlertInput,
+  WatchlistItem,
 } from '@fxpulse/shared';
 
 /** Satu-satunya tempat frontend berbicara dengan backend. Semua lewat /api (gateway). */
@@ -86,4 +92,42 @@ export const api = {
     request<ApiEnvelope<CryptoHistoryData>>(`/crypto/history${qs({ id, vs, range })}`),
   convert: (from: string, to: string, amount: number) =>
     request<ApiEnvelope<ConvertData>>(`/convert${qs({ from, to, amount })}`),
+
+  // ---- Auth ----
+  me: () => request<AuthResponse>('/auth/me'),
+  register: (email: string, password: string) =>
+    request<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+  login: (email: string, password: string) =>
+    request<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  resetRequest: (email: string) =>
+    request<{ ok: true }>('/auth/reset-request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  resetConfirm: (token: string, password: string) =>
+    request<{ ok: true }>('/auth/reset-confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    }),
+
+  // ---- Watchlist ----
+  watchlist: () => request<{ items: WatchlistItem[] }>('/watchlist'),
+  addWatchlist: (input: CreateWatchlistItemInput) =>
+    request<WatchlistItem>('/watchlist', { method: 'POST', body: JSON.stringify(input) }),
+  removeWatchlist: (id: string) => request<void>(`/watchlist/${id}`, { method: 'DELETE' }),
+
+  // ---- Alerts ----
+  alerts: () => request<{ items: Alert[] }>('/alerts'),
+  createAlert: (input: CreateAlertInput) =>
+    request<Alert>('/alerts', { method: 'POST', body: JSON.stringify(input) }),
+  updateAlert: (id: string, input: UpdateAlertInput) =>
+    request<Alert>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  removeAlert: (id: string) => request<void>(`/alerts/${id}`, { method: 'DELETE' }),
 };
