@@ -1,0 +1,78 @@
+# Gateway: satu origin untuk browser. Routing berdasarkan prefix path (FSD bagian 6).
+#   /api/fx, /api/crypto, /api/convert, /api/market -> market-service
+#   /api/auth, /api/watchlist, /api/alerts          -> user-service
+#   /                                                -> web (SPA)
+# Variabel ${...} diisi envsubst saat container start.
+
+# Rate limit ringan per IP hanya untuk endpoint kredensial (mencegah brute force sederhana).
+# /api/auth/me dan /api/auth/logout tidak dibatasi karena dipanggil setiap muat halaman.
+limit_req_zone $binary_remote_addr zone=auth:10m rate=${AUTH_RATE_LIMIT};
+
+upstream market_service {
+  server ${MARKET_SERVICE_HOST}:${MARKET_SERVICE_PORT};
+  keepalive 16;
+}
+
+upstream user_service {
+  server ${USER_SERVICE_HOST}:${USER_SERVICE_PORT};
+  keepalive 16;
+}
+
+upstream web_app {
+  server ${WEB_HOST}:${WEB_PORT};
+  keepalive 16;
+}
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
+server {
+  listen 8080;
+  server_name _;
+
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_read_timeout 30s;
+
+  add_header X-Content-Type-Options nosniff always;
+  add_header X-Frame-Options DENY always;
+  add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+  location = /healthz {
+    return 200 'ok';
+    add_header Content-Type text/plain;
+  }
+
+  # Health masing-masing layanan (dipakai monitoring / e2e).
+  location = /api/health/market { proxy_pass http://market_service/api/health; }
+  location = /api/health/user   { proxy_pass http://user_service/api/health; }
+
+  location /api/fx/      { proxy_pass http://market_service; }
+  location /api/crypto/  { proxy_pass http://market_service; }
+  location /api/convert  { proxy_pass http://market_service; }
+  location /api/market/  { proxy_pass http://market_service; }
+
+  location ~ ^/api/auth/(login|register|reset-request|reset-confirm)$ {
+    limit_req zone=auth burst=${AUTH_RATE_BURST} nodelay;
+    limit_req_status 429;
+    proxy_pass http://user_service;
+  }
+  location /api/auth/ { proxy_pass http://user_service; }
+  location /api/watchlist { proxy_pass http://user_service; }
+  location /api/alerts    { proxy_pass http://user_service; }
+
+  location /api/ {
+    return 404 '{"statusCode":404,"code":"NOT_FOUND","message":"Endpoint tidak ditemukan."}';
+    add_header Content-Type application/json;
+  }
+
+  location / {
+    proxy_pass http://web_app;
+  }
+}
