@@ -1,0 +1,52 @@
+# Overlay untuk pengujian e2e: upstream diganti mock, endpoint admin diaktifkan,
+# interval alert dipercepat, dan port layanan bantu diekspos ke host.
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --wait
+
+services:
+  mock-upstream:
+    image: ${IMAGE_PREFIX:-fxpulse}/mock-upstream:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args: { SERVICE: mock-upstream }
+    environment:
+      PORT: 4000
+    ports:
+      - '${MOCK_UPSTREAM_PORT:-4000}:4000'
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:4000/health']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  market-service:
+    environment:
+      NODE_ENV: test
+      FRANKFURTER_BASE_URL: http://mock-upstream:4000/v1
+      COINGECKO_BASE_URL: http://mock-upstream:4000/api/v3
+      MARKET_ADMIN_ENABLED: 'true'
+      UPSTREAM_TIMEOUT_MS: 2000
+    depends_on:
+      mock-upstream: { condition: service_healthy }
+
+  user-service:
+    environment:
+      NODE_ENV: test
+      JWT_SECRET: e2e-secret-e2e-secret-e2e-secret-e2e-secret
+      BCRYPT_ROUNDS: 4
+
+  alert-worker:
+    environment:
+      NODE_ENV: test
+      WORKER_ADMIN_ENABLED: 'true'
+      ALERT_INTERVAL_MS: 60000
+    ports:
+      - '${WORKER_ADMIN_PORT:-3003}:3003'
+
+  gateway:
+    ports:
+      - '${GATEWAY_PORT:-8080}:8080'
+    environment:
+      # Semua test berasal dari satu IP; longgarkan rate limit auth.
+      AUTH_RATE_LIMIT: 600r/m
+      AUTH_RATE_BURST: 200

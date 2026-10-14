@@ -1,0 +1,80 @@
+# CD bagian 2: deploy ke server lewat SSH + docker compose.
+# Berjalan otomatis setelah workflow Release sukses, atau manual (pilih tag/environment).
+#
+# Secrets yang dibutuhkan (Settings > Secrets and variables > Actions):
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (private key), DEPLOY_PATH (dir berisi .env di server)
+# Opsional: DEPLOY_PORT (22)
+# Server harus sudah punya docker compose dan file .env produksi (lihat .env.example).
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Tag image yang di-deploy (misal v1.0.0 atau latest)'
+        required: true
+        default: latest
+      environment:
+        description: 'Environment GitHub'
+        required: true
+        default: production
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'production' }}
+    timeout-minutes: 20
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag || github.event.workflow_run.head_branch }}
+      IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Periksa secrets
+        id: check
+        run: |
+          if [ -z "${{ secrets.DEPLOY_HOST }}" ] || [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secrets deploy belum diatur (DEPLOY_HOST/DEPLOY_SSH_KEY). Langkah deploy dilewati."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
+
+      - name: Salin compose ke server
+        if: steps.check.outputs.configured == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: 'docker-compose.yml,docker-compose.prod.yml'
+          target: ${{ secrets.DEPLOY_PATH }}
+
+      - name: Pull & up
+        if: steps.check.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            export IMAGE_PREFIX="${{ env.IMAGE_PREFIX }}" IMAGE_TAG="${{ env.IMAGE_TAG }}"
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 300
+            docker image prune -f
+            curl -fsS http://localhost:${GATEWAY_PORT:-8080}/api/health/market
+            curl -fsS http://localhost:${GATEWAY_PORT:-8080}/api/health/user

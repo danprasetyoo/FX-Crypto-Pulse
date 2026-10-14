@@ -76,7 +76,7 @@ memanggil API eksternal saat cache kosong; worker memakai cache yang sama lewat 
 ### gateway (nginx)
 
 Routing prefix (lihat `infra/gateway/conf.d/default.conf.template`), header keamanan dasar,
-rate limit ringan untuk `/api/auth/*`, `/api/health/market` dan `/api/health/user` untuk pemantauan.
+rate limit ringan per IP untuk endpoint kredensial `/api/auth/{login,register,reset-request,reset-confirm}` (env `AUTH_RATE_LIMIT`, `AUTH_RATE_BURST`; `/api/auth/me` tidak dibatasi), `/api/health/market` dan `/api/health/user` untuk pemantauan.
 Semua `/api/*` lain → 404 JSON.
 
 ## Skema PostgreSQL (FSD bagian 5)
