@@ -1,0 +1,27 @@
+# Overlay produksi: memakai image dari registry (tanpa build), tanpa Mailpit,
+# SMTP sungguhan dari env, dan port admin tidak diekspos.
+#   IMAGE_PREFIX=ghcr.io/<org>/fx-crypto-pulse IMAGE_TAG=v1.0.0 \
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --pull always
+
+services:
+  mailpit:
+    profiles: ['dev-only']
+
+  user-service:
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      COOKIE_SECURE: 'true'
+
+  alert-worker:
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      user-service: { condition: service_healthy }
+      market-service: { condition: service_healthy }
+    environment:
+      WORKER_ADMIN_ENABLED: 'false'
+
+  market-service:
+    environment:
+      MARKET_ADMIN_ENABLED: 'false'

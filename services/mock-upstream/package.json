@@ -1,0 +1,22 @@
+{
+  "name": "@fxpulse/mock-upstream",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiruan Frankfurter dan CoinGecko untuk pengujian e2e: data deterministik, bisa disetel ke mode down/429/timeout.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.9",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
